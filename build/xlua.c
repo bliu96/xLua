@@ -7,6 +7,7 @@
 */
 
 #define LUA_LIB
+#define XLUA_NOPEER LUA_REGISTRYINDEX
 
 #include "lua.h"
 #include "lualib.h"
@@ -389,6 +390,32 @@ void print_value(lua_State *L,  char *str, int idx) {
 //upvalue --- [1]: methods, [2]:getters, [3]:csindexer, [4]:base, [5]:indexfuncs, [6]:arrayindexer, [7]:baseindex
 //param   --- [1]: obj, [2]: key
 LUA_API int obj_indexer(lua_State *L) {	
+	int t = lua_type(L,1);
+	if (t == LUA_TUSERDATA)
+	{
+		/* Access alternative table */
+		#if LUA_VERSION_NUM == 501
+		lua_getfenv(L,1);
+		if (!lua_rawequal(L, -1, XLUA_NOPEER)) {
+			lua_pushvalue(L, 2); /* key */
+			lua_gettable(L, -2); /* on lua 5.1, we trade the "tolua_peers" lookup for a gettable call */
+			if (!lua_isnil(L, -1))
+				return 1;
+		};
+		#else
+		lua_pushstring(L,"xlua_peers");
+		lua_rawget(L,LUA_REGISTRYINDEX);        /* stack: obj key ubox */
+		lua_pushvalue(L,1);
+		lua_rawget(L,-2);                       /* stack: obj key ubox ubox[u] */
+		if (lua_istable(L,-1))
+		{
+			lua_pushvalue(L,2);  /* key */
+			lua_rawget(L,-2);                      /* stack: obj key ubox ubox[u] value */
+			if (!lua_isnil(L,-1))
+				return 1;
+		}
+		#endif
+	}
 	if (!lua_isnil(L, lua_upvalueindex(1))) {
 		lua_pushvalue(L, 2);
 		lua_gettable(L, lua_upvalueindex(1));
@@ -465,9 +492,48 @@ LUA_API int gen_obj_indexer(lua_State *L) {
 	return 0;
 }
 
+/* Store at ubox
+	* It stores, creating the corresponding table if needed,
+	* the pair key/value in the corresponding ubox table
+*/
+static void storeatubox (lua_State* L, int lo)
+{
+	#if LUA_VERSION_NUM == 501
+		lua_getfenv(L, lo);
+		if (lua_rawequal(L, -1, XLUA_NOPEER)) {
+			lua_pop(L, 1);
+			lua_newtable(L);
+			lua_pushvalue(L, -1);
+			lua_setfenv(L, lo);	/* stack: k,v,table  */
+		};
+		lua_insert(L, -3);
+		lua_settable(L, -3); /* on lua 5.1, we trade the "tolua_peers" lookup for a settable call */
+		lua_pop(L, 1);
+	#else
+	 /* stack: key value (to be stored) */
+		lua_pushstring(L,"xlua_peers");
+		lua_rawget(L,LUA_REGISTRYINDEX);        /* stack: k v ubox */
+		lua_pushvalue(L,lo);
+		lua_rawget(L,-2);                       /* stack: k v ubox ubox[u] */
+		if (!lua_istable(L,-1))
+		{
+			lua_pop(L,1);                          /* stack: k v ubox */
+			lua_newtable(L);                       /* stack: k v ubox table */
+			lua_pushvalue(L,1);
+			lua_pushvalue(L,-2);                   /* stack: k v ubox table u table */
+			lua_rawset(L,-4);                      /* stack: k v ubox ubox[u]=table */
+		}
+		lua_insert(L,-4);                       /* put table before k */
+		lua_pop(L,1);                           /* pop ubox */
+		lua_rawset(L,-3);                       /* store at table */
+		lua_pop(L,1);                           /* pop ubox[u] */
+	#endif
+}
+
 //upvalue --- [1]:setters, [2]:csnewindexer, [3]:base, [4]:newindexfuncs, [5]:arrayindexer, [6]:basenewindex
 //param   --- [1]: obj, [2]: key, [3]: value
 LUA_API int obj_newindexer(lua_State *L) {
+	int t = lua_type(L,1);
 	if (!lua_isnil(L, lua_upvalueindex(1))) {
 		lua_pushvalue(L, 2);
 		lua_gettable(L, lua_upvalueindex(1));
@@ -526,6 +592,9 @@ LUA_API int obj_newindexer(lua_State *L) {
 		lua_insert(L, 1);
 		lua_call(L, 3, 0);
 		return 0;
+	} else if (t == LUA_TUSERDATA) {
+        storeatubox(L, 1);
+        return 0;
 	} else {
 		return luaL_error(L, "cannot set %s, no such field", lua_tostring(L, 2));
 	}
@@ -1238,6 +1307,13 @@ LUA_API void luaopen_xlua(lua_State *L) {
 #if LUA_VERSION_NUM >= 503
 	luaL_newlib(L, xlualib);
 	lua_setglobal(L, "xlua");
+
+	/* create peer object table */
+	lua_pushstring(L, "xlua_peers"); lua_newtable(L);
+	/* make weak key metatable for peers indexed by userdata object */
+	lua_newtable(L); lua_pushliteral(L, "__mode"); lua_pushliteral(L, "k"); lua_rawset(L, -3);                /* stack: string peers mt */
+	lua_setmetatable(L, -2);   /* stack: string peers */
+	lua_rawset(L,LUA_REGISTRYINDEX);
 #else
 	luaL_register(L, "xlua", xlualib);
     lua_pop(L, 1);
