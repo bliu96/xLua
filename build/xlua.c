@@ -1290,6 +1290,50 @@ LUA_API int css_clone(lua_State *L) {
 	return 1;
 }
 
+/* stack: userdata, peer */
+LUA_API int setpeer(lua_State *L) {
+	int t = lua_type(L,1);
+	if (t == LUA_TUSERDATA)
+	{
+		#if LUA_VERSION_NUM == 501
+		if (lua_isnil(L, -1)) {
+
+			lua_pop(L, 1);
+			lua_pushvalue(L, TOLUA_NOPEER);
+		};
+		lua_setfenv(L, -2);
+		#else
+		lua_pushstring(L,"xlua_peers");
+		lua_rawget(L,LUA_REGISTRYINDEX);        /* stack: userdata peer ubox */
+		lua_pushvalue(L,1);						/* stack: userdata peer ubox userdata */
+		lua_pushvalue(L,2);
+		lua_rawset(L,3);                       /* stack: userdata peer ubox ubox[userdata] = peer */
+		#endif
+	} else {
+		lua_pushstring(L, "Invalid argument #1 to setpeer: userdata expected.");
+		lua_error(L);
+	}
+	return 0;
+}
+
+/* stack: userdata */
+LUA_API int getpeer(lua_State *L) {
+	#if LUA_VERSION_NUM == 501
+		lua_getfenv(L, -1);
+		if (lua_rawequal(L, -1, TOLUA_NOPEER)) {
+			lua_pop(L, 1);
+			lua_pushnil(L);
+		};
+	#else
+		lua_pushstring(L,"xlua_peers");
+		lua_rawget(L,LUA_REGISTRYINDEX);        /* stack: userdata ubox */
+		lua_pushvalue(L, 1);
+		lua_rawget(L,-2);
+	#endif
+	
+	return 1;
+}
+
 LUA_API void* xlua_gl(lua_State *L) {
 	return G(L);
 }
@@ -1298,6 +1342,8 @@ static const luaL_Reg xlualib[] = {
 	{"sethook", profiler_set_hook},
 	{"genaccessor", gen_css_access},
 	{"structclone", css_clone},
+	{"setpeer", setpeer},
+	{"getpeer", getpeer},
 	{NULL, NULL}
 };
 
