@@ -1299,7 +1299,7 @@ LUA_API int setpeer(lua_State *L) {
 		if (lua_isnil(L, -1)) {
 
 			lua_pop(L, 1);
-			lua_pushvalue(L, TOLUA_NOPEER);
+			lua_pushvalue(L, XLUA_NOPEER);
 		};
 		lua_setfenv(L, -2);
 		#else
@@ -1320,7 +1320,7 @@ LUA_API int setpeer(lua_State *L) {
 LUA_API int getpeer(lua_State *L) {
 	#if LUA_VERSION_NUM == 501
 		lua_getfenv(L, -1);
-		if (lua_rawequal(L, -1, TOLUA_NOPEER)) {
+		if (lua_rawequal(L, -1, XLUA_NOPEER)) {
 			lua_pop(L, 1);
 			lua_pushnil(L);
 		};
